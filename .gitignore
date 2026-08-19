@@ -1,0 +1,7 @@
+# Ignore everything locally by default
+*
+
+# Whitelist only necessary files for deployment
+!app.py
+!.gitignore
+!requirements.txt
