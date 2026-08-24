@@ -1,6 +1,11 @@
 streamlit
 pdfplumber
 pandas
-google-genai
-openpyxl
+openai
+rembg
+pillow
 python-dotenv
+google-cloud-storage
+google-auth
+openpyxl
+httpx
