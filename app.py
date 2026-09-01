@@ -12,7 +12,6 @@ import time
 import uuid
 import base64
 from dotenv import load_dotenv
-from rembg import remove
 from PIL import Image
 from openai import OpenAI
 import httpx
@@ -33,47 +32,41 @@ OPENAI_API_KEY = get_config("OPENAI_API_KEY")
 GCP_PROJECT_ID = get_config("GCP_PROJECT_ID", "caramel-goal-473111-t3")
 GCS_BUCKET_NAME = get_config("GCS_BUCKET_NAME", "gyaanbuddy-media")
 
-# Initialize OpenAI Client (Bypassing Windows/Cloud Proxies)
-if OPENAI_API_KEY:
+@st.cache_resource
+def get_openai_client():
+    if not OPENAI_API_KEY:
+        return None
     try:
         custom_http = httpx.Client(proxy=None, timeout=60.0)
-        openai_client = OpenAI(
+        return OpenAI(
             api_key=OPENAI_API_KEY, 
             http_client=custom_http,
             max_retries=3
         )
     except Exception as e:
-        openai_client = None
         print(f"OpenAI Initialization Error: {e}")
-else:
-    openai_client = None
+        return None
 
-# Initialize GCS Client securely (supports Streamlit Cloud Secrets or local file)
-try:
-    has_gcp_secret = False
+@st.cache_resource
+def get_gcs_client():
     try:
-        has_gcp_secret = "gcp_service_account" in st.secrets
-    except Exception:
-        pass
+        has_gcp_secret = False
+        try:
+            has_gcp_secret = "gcp_service_account" in st.secrets
+        except Exception:
+            pass
 
-    if has_gcp_secret:
-        # For Streamlit Community Cloud Deployment
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        credentials = service_account.Credentials.from_service_account_info(creds_dict)
-        storage_client = storage.Client(project=GCP_PROJECT_ID, credentials=credentials)
-    else:
-        # For Local Development (using gcp_credentials.json file)
-        storage_client = storage.Client(project=GCP_PROJECT_ID)
-except Exception as e:
-    storage_client = None
-    print(f"GCS Auth Error: {e}")
-
-# Initialize GCS Client for Cloud Storage Uploads
-try:
-    storage_client = storage.Client(project=GCP_PROJECT_ID)
-except Exception as e:
-    storage_client = None
-    print(f"GCS Auth Error: {e}")
+        if has_gcp_secret:
+            # For Streamlit Community Cloud Deployment
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            credentials = service_account.Credentials.from_service_account_info(creds_dict)
+            return storage.Client(project=GCP_PROJECT_ID, credentials=credentials)
+        else:
+            # For Local Development (using gcp_credentials.json file)
+            return storage.Client(project=GCP_PROJECT_ID)
+    except Exception as e:
+        print(f"GCS Auth Error: {e}")
+        return None
 
 # --- 2. TEXT EXTRACTION FUNCTIONS ---
 def natural_sort_key(s):
@@ -116,7 +109,8 @@ def extract_text_from_pdf(pdf_file_obj):
 
 def process_text_with_ai(raw_text, filename, max_retries=3):
     """Passes chapter text AND filename to GPT-4o-mini to extract structured data."""
-    if not openai_client:
+    client = get_openai_client()
+    if not client:
         st.error(f"🚨 OpenAI Client is not initialized. Please check your API key.")
         return []
         
@@ -151,7 +145,7 @@ def process_text_with_ai(raw_text, filename, max_retries=3):
 
     for attempt in range(1, max_retries + 1):
         try:
-            response = openai_client.chat.completions.create(
+            response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are a precise data extraction assistant. Always output clean, raw JSON."},
@@ -298,7 +292,8 @@ Icon Prompt:
 
 def generate_icon_prompt(subject: str, chapter: str, filename: str):
     """Uses GPT-4o-mini as a design agent to craft the perfect image prompt based on class level."""
-    if not openai_client:
+    client = get_openai_client()
+    if not client:
         raise ValueError("OpenAI client not initialized.")
         
     class_match = re.search(r'(?:class|grade|std)[\s_-]*(\d+)', filename, re.IGNORECASE)
@@ -312,7 +307,7 @@ def generate_icon_prompt(subject: str, chapter: str, filename: str):
     else:
         audience_style = "Target Audience: General students. Style Rules: Balanced modern 3D geometry, premium and polished."
 
-    response = openai_client.chat.completions.create(
+    response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": SYSTEM_DESIGN_PROMPT},
@@ -327,10 +322,11 @@ def generate_icon_prompt(subject: str, chapter: str, filename: str):
 
 def render_openai_image(prompt_text: str) -> Image.Image:
     """Renders the asset natively using OpenAI's latest gpt-image-2 model."""
-    if not openai_client:
+    client = get_openai_client()
+    if not client:
         raise ValueError("OpenAI client not initialized. Check OPENAI_API_KEY.")
         
-    response = openai_client.images.generate(
+    response = client.images.generate(
         model="gpt-image-2",
         prompt=prompt_text,
         n=1,
@@ -342,9 +338,10 @@ def render_openai_image(prompt_text: str) -> Image.Image:
 
 # --- 4. CLOUD STORAGE UPLOAD ---
 def upload_to_gcs(image_bytes: bytes, bucket_name: str, destination_blob_name: str) -> str:
-    if not storage_client:
+    client = get_gcs_client()
+    if not client:
         return "GCS_NOT_CONFIGURED_URL"
-    bucket = storage_client.bucket(bucket_name)
+    bucket = client.bucket(bucket_name)
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_string(image_bytes, content_type='image/png')
     return f"https://storage.googleapis.com/{bucket_name}/{destination_blob_name}"
@@ -386,6 +383,7 @@ if uploaded_files and st.button("Extract Data & Generate Master Excel", type="pr
         st.toast(f"Designing icon for: {chapter_name}")
         
         try:
+            from rembg import remove
             icon_prompt = generate_icon_prompt(subject_input, chapter_name, pdf_file.name)
             raw_image = render_openai_image(icon_prompt)
             transparent_icon = remove(raw_image)
