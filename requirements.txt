@@ -1,5 +1,5 @@
 streamlit
-pdfplumber
+pypdf
 pandas
 openai
 rembg
