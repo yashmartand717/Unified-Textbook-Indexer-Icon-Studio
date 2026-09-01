@@ -2,7 +2,7 @@ import os
 os.environ['NO_PROXY'] = '*'
 
 import streamlit as st
-import pypdf
+import pdfplumber
 import pandas as pd
 import json
 import io
@@ -100,11 +100,11 @@ def extract_pdf_streams(uploaded_files):
 
 def extract_text_from_pdf(pdf_file_obj):
     full_text = []
-    pdf = pypdf.PdfReader(pdf_file_obj)
-    for i, page in enumerate(pdf.pages):
-        text = page.extract_text()
-        if text:
-            full_text.append(f"--- PAGE {i+1} ---\n" + text)
+    with pdfplumber.open(pdf_file_obj) as pdf:
+        for i, page in enumerate(pdf.pages):
+            text = page.extract_text()
+            if text:
+                full_text.append(f"--- PAGE {i+1} ---\n" + text)
     return "\n\n".join(full_text)
 
 def process_text_with_ai(raw_text, filename, max_retries=3):
@@ -321,16 +321,16 @@ def generate_icon_prompt(subject: str, chapter: str, filename: str):
     return prompt_match.group(1).strip().strip('"').strip("'") if prompt_match else output_text.strip()
 
 def render_openai_image(prompt_text: str) -> Image.Image:
-    """Renders the asset natively using OpenAI's DALL-E 2 model for faster processing."""
+    """Renders the asset natively using OpenAI's latest gpt-image-2 model."""
     client = get_openai_client()
     if not client:
         raise ValueError("OpenAI client not initialized. Check OPENAI_API_KEY.")
         
     response = client.images.generate(
-        model="dall-e-2",
+        model="gpt-image-2",
         prompt=prompt_text,
         n=1,
-        size="512x512"
+        size="1024x1024"
     )
     
     image_bytes = base64.b64decode(response.data[0].b64_json)
