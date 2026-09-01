@@ -22,10 +22,16 @@ from google.oauth2 import service_account
 # --- 1. CONFIGURATION & AUTHENTICATION ---
 load_dotenv()
 
+def get_config(key, default=None):
+    try:
+        return st.secrets[key]
+    except Exception:
+        return os.getenv(key, default)
+
 # Pull keys from Streamlit Secrets (Cloud) or fallback to local .env
-OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
-GCP_PROJECT_ID = st.secrets.get("GCP_PROJECT_ID", os.getenv("GCP_PROJECT_ID", "caramel-goal-473111-t3"))
-GCS_BUCKET_NAME = st.secrets.get("GCS_BUCKET_NAME", "gyaanbuddy-media")
+OPENAI_API_KEY = get_config("OPENAI_API_KEY")
+GCP_PROJECT_ID = get_config("GCP_PROJECT_ID", "caramel-goal-473111-t3")
+GCS_BUCKET_NAME = get_config("GCS_BUCKET_NAME", "gyaanbuddy-media")
 
 # Initialize OpenAI Client (Bypassing Windows/Cloud Proxies)
 if OPENAI_API_KEY:
@@ -44,7 +50,13 @@ else:
 
 # Initialize GCS Client securely (supports Streamlit Cloud Secrets or local file)
 try:
-    if "gcp_service_account" in st.secrets:
+    has_gcp_secret = False
+    try:
+        has_gcp_secret = "gcp_service_account" in st.secrets
+    except Exception:
+        pass
+
+    if has_gcp_secret:
         # For Streamlit Community Cloud Deployment
         creds_dict = dict(st.secrets["gcp_service_account"])
         credentials = service_account.Credentials.from_service_account_info(creds_dict)
@@ -55,8 +67,6 @@ try:
 except Exception as e:
     storage_client = None
     print(f"GCS Auth Error: {e}")
-else:
-    openai_client = None
 
 # Initialize GCS Client for Cloud Storage Uploads
 try:
